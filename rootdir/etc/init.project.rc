@@ -1,0 +1,128 @@
+# MTK project .rc configure
+
+import init.mt6761.usb.rc
+
+on init
+    mkdir /mnt/media_rw/usbotg 0700 media_rw media_rw
+    mkdir /storage/usbotg 0700 root root
+
+on post-fs
+    #TCT mobile_info
+    #DO NOT mount mobile_info in fstab, since GSI don't have the mount point.
+    mount ext4 /dev/block/platform/bootdevice/by-name/mobile_info /mobile_info noatime nosuid nodev commit=1
+
+    chown system system /mobile_info
+    mkdir /mobile_info/tct_call_data 0770 system system
+    #set xxx5 so that radio group can read it.
+    mkdir /mobile_info/apn_info 0775 system system
+
+
+on post-fs-data
+
+#Camera
+    chmod 0660 /dev/MAINAF
+    chown system camera /dev/MAINAF
+
+    chmod 0660 /dev/MAINAF2
+    chown system camera /dev/MAINAF2
+
+    chmod 0660 /dev/SUBAF
+    chown system camera /dev/SUBAF
+
+    chmod 0660 /dev/GAF001AF
+    chown system camera /dev/GAF001AF
+
+    chmod 0660 /dev/DW9714AF
+    chown system camera /dev/DW9714AF
+
+    chmod 0660 /dev/LC898212AF
+    chown system camera /dev/LC898212AF
+
+    chmod 0660 /dev/BU64745GWZAF
+    chown system camera /dev/BU64745GWZAF
+
+#SMB
+    chown system system /proc/smb/ScreenComm
+    chmod 0660 /proc/smb/ScreenComm
+
+    chmod 0660 /dev/spm
+    chown system system /dev/spm
+
+#[TCTOPTIMIZE] Added by dingpengzheng for task 8373796 @{
+    write /dev/cpuset/background/cpus 0-2
+#[TCTOPTIMIZE] @}
+
+on init
+    # Refer to http://source.android.com/devices/tech/storage/index.html
+    # It said, "Starting in Android 4.4, multiple external storage devices are surfaced to developers through
+    #           Context.getExternalFilesDirs(), Context.getExternalCacheDirs(), and Context.getObbDirs().
+    #           External storage devices surfaced through these APIs must be a semi-permanent part of the device (such as an SD card slot in a battery compartment).
+    #           Developers expect data stored in these locations to be available over long periods of time."
+    # Therefore, if the target doesn't support sd hot-plugging (Ex: the SD card slot in a battery compartment), we need to export SECONDARY_STORAGE in 'boot' section
+    #
+    # export SECONDARY_STORAGE /storage/sdcard1
+
+service fuse_usbotg /system/bin/sdcard -u 1023 -g 1023 -w 1023 -d /mnt/media_rw/usbotg /storage/usbotg
+    class late_start
+    disabled
+
+service spm_script /vendor/bin/spm_loader
+    user system
+    group system
+    class core
+    oneshot
+
+# start remosaic_daemon
+on property:sys.boot_completed=1
+    start remosaic_daemon
+
+service remosaic_daemon /vendor/bin/remosaic_daemon
+    class core
+    user system
+    group system
+    oneshot
+    disabled
+
+#[TCTOPTIMIZE] Added by dingpengzheng for task 8169345 @{
+on property:ro.vendor.iocgrp.config=1
+    #init blkio
+    mkdir /dev/blkio
+    mount cgroup none /dev/blkio blkio
+    mkdir /dev/blkio/background
+
+    write /dev/blkio/blkio.weight 1000
+    write /dev/blkio/background/blkio.weight 100
+
+    chown root system /dev/blkio
+    chown root system /dev/blkio/tasks
+    chown root system /dev/blkio/blkio.weight
+    chown root system /dev/blkio/background
+    chown root system /dev/blkio/background/tasks
+    chown root system /dev/blkio/background/blkio.weight
+#[TCTOPTIMIZE] @}
+
+# Begin added by bitao.xiong for task-8279286 on 2019-09-05
+service logcat2uart /system/bin/logcat  -b system -b main -b events -v printable -f /dev/kmsg -r 1024 -n 256
+    oneshot
+    disabled
+    user root
+    group log system root
+    writepid /dev/cpuset/system-background/tasks
+
+on post-fs-data && property:ro.boot.logcat2uart.enable=1
+    start logcat2uart
+    write /dev/kmsg "start logcat2uart"
+
+on property:sys.boot_completed=1 && property:ro.boot.logcat2uart.enable=1
+    write /dev/kmsg "stop logcat2uart"
+    stop logcat2uart
+
+# End added by bitao.xiong for task-8279286 on 2019-09-05
+
+# task8393844/defect8478997 add shangpeng.su@tcl.com 2019/10/29 begin
+on property:vendor.a2dp.reduce.rf.sar=0 && property:sys.rf.sar.status=1
+    exec - root shell -- /vendor/bin/iwpriv_system wlan0 driver "set_pwr_ctrl Sar_Scenario 7"
+
+on property:vendor.a2dp.reduce.rf.sar=1
+    exec - root shell -- /vendor/bin/iwpriv_system wlan0 driver "set_pwr_ctrl Sar_Scenario 1"
+# task8393844/defect8478997 add shangpeng.su@tcl.com 2019/10/29 end
